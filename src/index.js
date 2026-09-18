@@ -64,6 +64,9 @@ export function apply(ctx, rawConfig = {}) {
   if (config.baseUrl === '') {
     logger?.info?.('dsh-tmp-hook: `baseUrl` is unset; deriving the callback origin from the deployment trust fence')
   }
+  if (publicOrigin() === '') {
+    logger?.info?.('dsh-tmp-hook: no callback origin yet; it will be resolved on the first request_tmp_hook call')
+  }
 
   /**
    * Admit one prompt into a session, resuming its agent when it is not live.

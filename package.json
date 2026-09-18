@@ -1,0 +1,54 @@
+{
+  "name": "dsh-tmp-hook",
+  "version": "0.1.0",
+  "description": "One-time ephemeral webhook tool for DeepSeek Harness (dsh): mint a single-use callback URL, then wake the requesting agent session with the delivered payload.",
+  "license": "MIT",
+  "author": "Arcadia",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "cordis",
+    "webhook",
+    "callback",
+    "agent",
+    "async"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arcadia822/dsh-tmp-hook.git"
+  },
+  "homepage": "https://github.com/Arcadia822/dsh-tmp-hook#readme",
+  "bugs": {
+    "url": "https://github.com/Arcadia822/dsh-tmp-hook/issues"
+  },
+  "main": "src/index.js",
+  "exports": {
+    ".": {
+      "default": "./src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  }
+}

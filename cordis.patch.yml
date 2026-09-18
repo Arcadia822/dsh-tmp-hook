@@ -1,0 +1,13 @@
+# dsh-tmp-hook bundle patch: mounts the one-time ephemeral webhook plugin.
+#
+# `dsh plugin --profile <name> add dsh-tmp-hook` reconciles `dsh.profile.bundles`
+# for packages that declare `dsh.bundle.patch`, so this row is registered on
+# install and no manual patch editing is required.
+#
+# Per-deployment values (`baseUrl`, `pathPrefix`, TTLs, ...) intentionally stay
+# out of this bundle layer: override them in the profile's own
+# `cordis.patch.yml` (or a `--patch` overlay), which is applied after every
+# bundle layer.
+- insert:
+    - id: tmp-hook
+      name: "dsh-tmp-hook"

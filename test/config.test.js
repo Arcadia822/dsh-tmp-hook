@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { resolveConfig } from '../src/config.js'
+import { resolveBaseUrl, resolveConfig } from '../src/config.js'
 
 test('defaults are applied when the entry has no config', () => {
   const config = resolveConfig(undefined)
@@ -47,4 +47,36 @@ test('a base URL must be an absolute http(s) origin', () => {
   assert.throws(() => resolveConfig({ baseUrl: 'dsh.example.com' }), /must be an absolute URL/)
   assert.throws(() => resolveConfig({ baseUrl: 'ftp://dsh.example.com' }), /must use http or https/)
   assert.equal(resolveConfig({ baseUrl: 'https://dsh.example.com/x' }).baseUrl, 'https://dsh.example.com/x')
+})
+
+test('baseUrlScheme is restricted to http and https', () => {
+  assert.throws(() => resolveConfig({ baseUrlScheme: 'ftp' }), /`baseUrlScheme` must be "http" or "https"/)
+  assert.equal(resolveConfig({}).baseUrlScheme, 'https')
+})
+
+test('the trust fence supplies an origin only when baseUrl is unset', () => {
+  const trustedHosts = ['127.0.0.1:3080', 'localhost:3080', 'dsh.example.com', 'dsh.example.com:3080']
+
+  assert.deepEqual(resolveBaseUrl({ baseUrl: '', scheme: 'https', trustedHosts }), {
+    url: 'https://dsh.example.com',
+    source: 'trusted-host dsh.example.com',
+  })
+  assert.deepEqual(resolveBaseUrl({ baseUrl: 'http://x.example', scheme: 'https', trustedHosts }), {
+    url: 'http://x.example',
+    source: 'config',
+  })
+})
+
+test('an unusable trust fence yields no origin instead of a plausible wrong one', () => {
+  for (const trustedHosts of [
+    [],
+    ['10.0.0.4'],
+    ['10.0.0.4:3080'],
+    ['[::1]:3080'],
+    ['localhost'],
+    ['box.local'],
+    ['dsh.example.com:8443'],
+  ]) {
+    assert.deepEqual(resolveBaseUrl({ baseUrl: '', scheme: 'https', trustedHosts }), { url: '', source: '' })
+  }
 })

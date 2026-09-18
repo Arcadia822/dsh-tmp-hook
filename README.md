@@ -36,12 +36,17 @@ after every bundle layer:
 ```yaml
 - id: tmp-hook
   config:
-    baseUrl: https://dsh.example.com
+    baseUrl: https://dsh.example.com   # optional: overrides the derived origin
 ```
 
-`baseUrl` is the only value you normally have to set: it is the public origin the external
-worker will call. Until it is set, `request_tmp_hook` fails loudly rather than handing out a
-URL nobody can reach.
+`baseUrl` is the public origin the external worker will call. You usually do not have to set
+it: a console served behind a reverse proxy must already declare its public domain with
+`--trusted-host <domain>` or the browser-trust fence rejects it, and the plugin derives the
+origin from that same declaration. Set `baseUrl` explicitly when the deployment declares no
+port-less domain (an IP-only or loopback-only bind), or to override the derived scheme.
+
+With neither an explicit `baseUrl` nor a usable declaration, `request_tmp_hook` fails loudly
+rather than handing a worker a URL nobody can reach.
 
 To try it from a checkout instead of the registry:
 
@@ -53,7 +58,8 @@ dsh plugin --profile web add /path/to/dsh-tmp-hook
 
 | key | default | meaning |
 | --- | --- | --- |
-| `baseUrl` | `''` | Public origin prepended to every callback URL. Must be an absolute `http`/`https` URL; trailing slashes are stripped. Empty means unconfigured. |
+| `baseUrl` | `''` | Public origin prepended to every callback URL. Must be an absolute `http`/`https` URL; trailing slashes are stripped. Empty means "derive it from the trust fence". |
+| `baseUrlScheme` | `'https'` | Scheme assumed for a derived origin. Ignored when `baseUrl` is set. |
 | `pathPrefix` | `'/api/tmp-hooks'` | Path prefix the callback route is registered under. Must be a sub-path; `/` is rejected. |
 | `ttlSeconds` | `1800` | Default token lifetime when the tool call omits `ttl_seconds`. |
 | `minTtlSeconds` | `30` | Lower clamp for a requested `ttl_seconds`. |
@@ -67,6 +73,14 @@ Unknown keys and malformed values are rejected at load time: a bad config fails 
 instead of failing the first callback.
 
 ## Agent tool: `request_tmp_hook`
+
+The description the model sees states when to reach for the tool: **before handing work to
+anything that finishes after the current turn** and cannot be awaited in place — a sandboxed
+or remote worker, a container or AgentOS task, a CI job, a long-running script, a dispatched
+agent, or a human replying out of band. It also states when not to: work that completes
+inside this turn, a result you will poll for anyway, or a channel the worker already holds.
+The model is told to pass the URL to the worker as part of the task and to record enough
+detail in `purpose` to recognize which awaited completion fired.
 
 Arguments (both optional):
 
@@ -168,6 +182,10 @@ deliberately out of scope for this plugin.
 
 - Tokens live in the dsh process. A restart invalidates every outstanding callback URL;
   the worker's POST then returns `404` and the coordinator has to mint a new hook.
+- The origin is derived from the deployment's own `--trusted-host` declarations, never from
+  a request `Host` header. A Host header is attacker-controlled, so trusting the last-seen
+  one would let anyone who can reach the console poison every future callback URL; an
+  underivable origin fails loudly instead.
 - The plugin is host-only: no browser half, no settings page, no UI.
 - The plugin imports nothing outside Node's standard library. It composes only the
   `webServer`, `tools`, and `sessionController` harness services, so it drops into any

@@ -17,7 +17,7 @@
  */
 import { randomUUID } from 'node:crypto'
 
-import { resolveConfig } from './config.js'
+import { resolveBaseUrl, resolveConfig } from './config.js'
 import { composeUnauthenticatedPrefix } from './gate.js'
 import { createCallbackHandler } from './http.js'
 import { TokenStore } from './store.js'
@@ -40,8 +40,29 @@ export function apply(ctx, rawConfig = {}) {
   const logger = ctx.logger?.('dsh-tmp-hook')
   const store = new TokenStore()
 
+  /**
+   * The public origin, resolved on first use.
+   *
+   * `webRuntime` is read lazily rather than injected so this plugin mounts
+   * whatever the row order is; only a successful resolution is cached, so a
+   * late-provided service still self-heals.
+   */
+  let origin
+  const publicOrigin = () => {
+    if (origin !== undefined) return origin
+    const resolved = resolveBaseUrl({
+      baseUrl: config.baseUrl,
+      scheme: config.baseUrlScheme,
+      trustedHosts: ctx.get('webRuntime')?.trustedHosts ?? [],
+    })
+    if (resolved.url === '') return ''
+    origin = resolved.url
+    logger?.info?.(`dsh-tmp-hook: callback origin ${origin} (from ${resolved.source})`)
+    return origin
+  }
+
   if (config.baseUrl === '') {
-    logger?.warn?.('dsh-tmp-hook: `baseUrl` is unset; request_tmp_hook will fail until it is configured in the profile patch')
+    logger?.info?.('dsh-tmp-hook: `baseUrl` is unset; deriving the callback origin from the deployment trust fence')
   }
 
   /**
@@ -61,7 +82,7 @@ export function apply(ctx, rawConfig = {}) {
     }, AbortSignal.timeout(config.deliverTimeoutMs))
   }
 
-  ctx.tools.register(createRequestTmpHookTool({ config, store, baseUrl: config.baseUrl }))
+  ctx.tools.register(createRequestTmpHookTool({ config, store, publicOrigin }))
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',

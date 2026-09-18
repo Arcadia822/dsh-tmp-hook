@@ -27,10 +27,12 @@ dsh plugin --profile web add dsh-tmp-hook
 ```yaml
 - id: tmp-hook
   config:
-    baseUrl: https://dsh.example.com
+    baseUrl: https://dsh.example.com   # 可选：覆盖推导值
 ```
 
-通常只需要设 `baseUrl`——外部 Worker 要调的公网源站。没设之前 `request_tmp_hook` 会**明确报错**，而不是发一个谁都到不了的 URL。
+`baseUrl` 是外部 Worker 要调的公网源站。**通常不需要手工设**：被反代到域名后面的控制台，本来就必须用 `--trusted-host <domain>` 声明自己的公网域名，否则浏览器的信任围栏会拒绝它——插件就直接从这份声明里推导源站。只有部署没有声明任何无端口域名（只绑 IP 或只绑 loopback）时，才需要显式设 `baseUrl`，或用它覆盖推导出的 scheme。
+
+既没配 `baseUrl` 也推导不出时，`request_tmp_hook` 会**明确报错**，而不是给 Worker 一个谁都到不了的 URL。
 
 从源码目录试装：
 
@@ -42,7 +44,8 @@ dsh plugin --profile web add /path/to/dsh-tmp-hook
 
 | 键 | 默认 | 含义 |
 | --- | --- | --- |
-| `baseUrl` | `''` | 回调 URL 的公网源站，必须是绝对 `http`/`https` URL，尾部斜杠会被去掉。空 = 未配置。 |
+| `baseUrl` | `''` | 回调 URL 的公网源站，必须是绝对 `http`/`https` URL，尾部斜杠会被去掉。空 = 从信任围栏推导。 |
+| `baseUrlScheme` | `'https'` | 推导源站时假定的 scheme；设了 `baseUrl` 时忽略。 |
 | `pathPrefix` | `'/api/tmp-hooks'` | 回调路由的路径前缀。必须是子路径，`/` 会被拒绝。 |
 | `ttlSeconds` | `1800` | 工具调用未传 `ttl_seconds` 时的默认有效期。 |
 | `minTtlSeconds` | `30` | `ttl_seconds` 下限。 |
@@ -55,6 +58,8 @@ dsh plugin --profile web add /path/to/dsh-tmp-hook
 未知键与非法值在**加载期**就被拒绝：配置写错会导致启动失败，而不是第一次回调时才失败。
 
 ## Agent 工具：`request_tmp_hook`
+
+模型看到的描述里写清了**什么时候该用**：在把工作交给"本轮结束之后才完成、且无法就地 await"的东西之前——沙盒/远端 Worker、容器或 AgentOS 任务、CI job、长跑脚本、已派往别处的 Agent、会异步回复的人。也写清了不该用的情形：本轮内就能完成的工作、反正要轮询的结果、Worker 已经握有通信渠道的情况。同时要求模型把 URL 作为任务的一部分交给 Worker，并在 `purpose` 里写足信息以便认领回调。
 
 参数（都可选）：
 
@@ -135,6 +140,7 @@ all green
 ## 范围与限制
 
 - token 存在 dsh 进程内存里。进程重启后所有已发出的回调 URL 失效，Worker 再 POST 会得到 `404`，协调者需要重新申请。
+- 源站只来自部署自己声明的 `--trusted-host`，**绝不**取自请求的 `Host` 头。`Host` 头由客户端控制，若采信"最近一次见到的 Host"，任何能访问控制台的人都能污染此后所有回调 URL；推导不出时会明确报错而不是猜。
 - 插件是 host-only：没有浏览器半边、没有设置页、没有 UI。
 - 除 Node 标准库外**不 import 任何东西**。只组合 `webServer`、`tools`、`sessionController` 三个宿主服务，因此可以直接装进任何 profile，不会引入第二份宿主依赖。
 

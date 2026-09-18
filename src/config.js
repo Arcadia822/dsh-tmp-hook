@@ -6,8 +6,10 @@
  * documented here, at load time rather than at request time.
  */
 const DEFAULTS = {
-  /** Public origin prepended to every callback URL, e.g. `https://dsh.example.com`. Empty = unconfigured, which makes `request_tmp_hook` fail loudly. */
+  /** Public origin prepended to every callback URL, e.g. `https://dsh.example.com`. Empty = derive it from the deployment's `--trusted-host` domains, and fail loudly if that is not possible either. */
   baseUrl: '',
+  /** Scheme assumed for an origin derived from a `--trusted-host` domain; ignored when `baseUrl` is set. */
+  baseUrlScheme: 'https',
   /** Absolute path prefix the callback route is registered under. */
   pathPrefix: '/api/tmp-hooks',
   /** Default token lifetime in seconds. */
@@ -67,6 +69,46 @@ function normalizeBaseUrl(raw) {
   return value
 }
 
+/** Whether one trust-fence authority is a usable public DNS name. */
+function isPublicDnsAuthority(authority) {
+  // A bare hostname only: IPv6 literals are bracketed, anything else carrying
+  // a colon is host:port, and both are unusable as a public origin here (the
+  // proxy terminates the port).
+  if (authority === '' || authority.includes(':') || authority.includes('[')) return false
+  if (authority === 'localhost' || authority.endsWith('.local')) return false
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(authority)) return false
+  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(authority)
+}
+
+/**
+ * Resolve the public origin used to build callback URLs.
+ *
+ * `baseUrl` is authoritative. When it is unset, fall back to the deployment's
+ * own trust fence: a console served behind a reverse proxy must already
+ * declare its public authority with `--trusted-host <domain>` or the browser
+ * would be rejected, so that domain is the origin — no second copy of the same
+ * fact in this plugin's config. Only a port-less DNS name qualifies; an IP
+ * literal or an explicit `host:port` cannot be turned into a public origin
+ * without guessing, and a wrong guess would hand a worker an unreachable URL.
+ * @param options - the configured base URL, the scheme for derived origins, and declared authorities.
+ * @returns the origin and where it came from; `url` is `''` when nothing usable was declared.
+ */
+export function resolveBaseUrl({ baseUrl, scheme, trustedHosts = [] }) {
+  if (baseUrl !== '') return { url: baseUrl, source: 'config' }
+  for (const candidate of trustedHosts) {
+    const authority = String(candidate ?? '').trim()
+    if (!isPublicDnsAuthority(authority)) continue
+    const url = `${scheme}://${authority}`
+    try {
+      new URL(url)
+    } catch {
+      continue
+    }
+    return { url, source: `trusted-host ${authority}` }
+  }
+  return { url: '', source: '' }
+}
+
 /**
  * Validate and normalize the raw Cordis entry config.
  * @param raw - the loader entry's `config` mapping.
@@ -86,6 +128,9 @@ export function resolveConfig(raw) {
   if (config.allowUnauthenticated !== undefined && typeof config.allowUnauthenticated !== 'boolean') {
     throw new Error('dsh-tmp-hook: `allowUnauthenticated` must be a boolean')
   }
+  if (config.baseUrlScheme !== undefined && config.baseUrlScheme !== 'http' && config.baseUrlScheme !== 'https') {
+    throw new Error(`dsh-tmp-hook: \`baseUrlScheme\` must be "http" or "https", got ${JSON.stringify(config.baseUrlScheme)}`)
+  }
 
   const minTtlSeconds = readCount(config, 'minTtlSeconds', { positive: true })
   const maxTtlSeconds = readCount(config, 'maxTtlSeconds')
@@ -95,6 +140,7 @@ export function resolveConfig(raw) {
 
   return {
     baseUrl: normalizeBaseUrl(config.baseUrl ?? DEFAULTS.baseUrl),
+    baseUrlScheme: config.baseUrlScheme ?? DEFAULTS.baseUrlScheme,
     pathPrefix: normalizePathPrefix(config.pathPrefix ?? DEFAULTS.pathPrefix),
     ttlSeconds: readCount(config, 'ttlSeconds', { positive: true }),
     minTtlSeconds,

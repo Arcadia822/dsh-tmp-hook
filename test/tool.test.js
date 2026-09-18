@@ -1,16 +1,21 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { resolveConfig } from '../src/config.js'
+import { resolveBaseUrl, resolveConfig } from '../src/config.js'
 import { TokenStore } from '../src/store.js'
 import { createRequestTmpHookTool, TOOL_NAME } from '../src/tool.js'
 
-/** Build the tool over a fresh store. */
-function setup(rawConfig = {}) {
+/** Build the tool over a fresh store, with the origin either configured or derived. */
+function setup(rawConfig = {}, { trustedHosts } = {}) {
   const config = resolveConfig({ baseUrl: 'https://dsh.example.com', ...rawConfig })
   const store = new TokenStore()
-  const tool = createRequestTmpHookTool({ config, store, baseUrl: config.baseUrl })
-  return { config, store, tool }
+  const publicOrigin = () => resolveBaseUrl({
+    baseUrl: config.baseUrl,
+    scheme: config.baseUrlScheme,
+    trustedHosts: trustedHosts ?? [],
+  }).url
+  const tool = createRequestTmpHookTool({ config, store, publicOrigin })
+  return { config, store, tool, publicOrigin }
 }
 
 const EXEC = { agent: { session: { id: 'session-7' } } }
@@ -77,11 +82,26 @@ test('an execution without a session is refused', async () => {
   await assert.rejects(() => tool.execute({}, {}), /requires a session-backed agent/)
 })
 
-test('an unconfigured base URL is refused loudly', async () => {
-  const config = resolveConfig({})
-  const tool = createRequestTmpHookTool({ config, store: new TokenStore(), baseUrl: config.baseUrl })
+test('an origin that can be neither configured nor derived is refused loudly', async () => {
+  const { tool } = setup({ baseUrl: '' }, { trustedHosts: ['127.0.0.1', 'localhost:3080'] })
 
   await assert.rejects(() => tool.execute({}, EXEC), /set `baseUrl`/)
+})
+
+test('an unconfigured base URL falls back to the deployment trust fence', async () => {
+  const { tool } = setup({ baseUrl: '' }, {
+    trustedHosts: ['127.0.0.1:3080', 'localhost:3080', 'dsh.example.com', 'dsh.example.com:3080'],
+  })
+
+  const value = await tool.execute({}, EXEC)
+
+  assert.equal(value.url, `https://dsh.example.com/api/tmp-hooks/${value.token}`)
+})
+
+test('a configured base URL always wins over a declared domain', async () => {
+  const { tool } = setup({ baseUrl: 'http://internal.example:8080' }, { trustedHosts: ['dsh.example.com'] })
+
+  assert.match((await tool.execute({}, EXEC)).url, /^http:\/\/internal\.example:8080\//)
 })
 
 test('presenters never throw on replayed args', () => {

@@ -32,10 +32,14 @@ const OUTPUT_SCHEMA = {
 }
 
 const DESCRIPTION = [
-  'Create a one-time, self-destructing callback URL bound to this session.',
-  'Hand the URL to an external, sandboxed, or asynchronous worker; when that worker POSTs to the URL, the body — JSON or any other text — is appended to this session as a user message and wakes you.',
-  'The URL works exactly once: a second POST returns 410, and an expired token returns 410. Request a fresh hook whenever a new external completion must be awaited.',
-].join(' ')
+  'Ask an external worker to notify this session when it finishes.',
+  '',
+  'Use this BEFORE handing work to anything that will complete later than the current turn and cannot be awaited here: a sandboxed or remote worker, a container or AgentOS task, a CI job, a long-running script, another agent that was dispatched elsewhere, or a human who will reply out of band.',
+  'The call returns a single-use HTTPS URL. Give that URL to the worker as part of the task, and tell the worker to POST its result to it exactly once. The POST is appended to this session as a user message and wakes you, so put enough detail in `purpose` to recognize which awaited completion fired.',
+  '',
+  'Do not use this when the work completes inside this turn (call the tool that does the work instead), when you will poll for the result anyway, or when the worker can already reach you through a channel it holds (an existing webhook subscription, a message bus).',
+  'Request one hook per awaited completion: the URL is consumed by its first successful POST, a second POST returns 410, and an expired token returns 410, so a stale URL must be replaced rather than retried.',
+].join('\n')
 
 /** Validate the model-supplied arguments. */
 function validateArgs(args) {
@@ -70,10 +74,10 @@ function sessionIdOf(exec) {
  * The definition is written as a raw `ToolDefinition` rather than through
  * `defineTool` so the plugin ships with no runtime dependencies; the parameter
  * and output schemas are the registry's own published contract.
- * @param options - resolved config, token store, and the configured public origin.
+ * @param options - resolved config, token store, and a resolver for the public origin.
  * @returns a registry-ready tool definition.
  */
-export function createRequestTmpHookTool({ config, store, baseUrl }) {
+export function createRequestTmpHookTool({ config, store, publicOrigin }) {
   return {
     name: TOOL_NAME,
     description: DESCRIPTION,
@@ -108,8 +112,12 @@ export function createRequestTmpHookTool({ config, store, baseUrl }) {
       validateArgs(args)
       const sessionId = sessionIdOf(exec)
       if (sessionId === undefined) throw new Error(`${TOOL_NAME}: requires a session-backed agent`)
-      if (baseUrl === '') {
-        throw new Error('dsh-tmp-hook is not configured: set `baseUrl` (the public origin of this dsh host) in the profile patch')
+      const origin = publicOrigin()
+      if (origin === '') {
+        throw new Error(
+          'dsh-tmp-hook cannot build a callback URL: set `baseUrl` (the public origin of this dsh host) in the profile patch, '
+          + 'or declare the public domain with `--trusted-host <domain>` when starting dsh',
+        )
       }
       const ttlSeconds = clampTtl(args.ttl_seconds, config)
       const purpose = args.purpose?.trim()
@@ -119,7 +127,7 @@ export function createRequestTmpHookTool({ config, store, baseUrl }) {
         ttlSeconds,
       })
       return {
-        url: `${baseUrl}${config.pathPrefix}/${record.token}`,
+        url: `${origin}${config.pathPrefix}/${record.token}`,
         token: record.token,
         session_id: sessionId,
         expires_at: new Date(record.expiresAt).toISOString(),

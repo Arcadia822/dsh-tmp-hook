@@ -141,7 +141,7 @@ all green
 ## 开发
 
 ```bash
-node --test test/
+node --test test/*.test.js
 ```
 
 测试覆盖 token 表（单次、过期、claim/release、清扫）、HTTP 处理器（上表每个状态码、并发、载荷渲染）、配置校验与工具契约。

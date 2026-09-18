@@ -176,7 +176,7 @@ deliberately out of scope for this plugin.
 ## Development
 
 ```bash
-node --test test/
+node --test test/*.test.js
 ```
 
 The suite covers the token store (single use, expiry, claim/release, sweep), the HTTP
